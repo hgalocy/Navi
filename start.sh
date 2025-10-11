@@ -4,14 +4,13 @@
 # Llama.cpp server
 LLAMA_BIN="${HOME}/llama.cpp/build/bin/llama-server"
 LLAMA_MODEL="${HOME}/models/llm/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
-LLM_SERVER_BASH_START_SCRIPT="./home/NaviRun/llm_server.x"
 LLAMA_ARGS="-c 4096 -t 4 -ngl 0 --port 8080 --host 127.0.0.1"
 
 # Mic and Speaker
 # Vosk + Piper
 AREC_DEVICE="${AREC_DEVICE:-default}" #"plughw:2,0"
 VOSK_MODEL_DIR="/home/freezypaws/models/vosk/en-us"
-ASR_SCRIPT="${HOME}/sandbox/NaviSpeaks/navi_speaks_mvp.py"
+ASR_SCRIPT="NaviSpeaks/navi_speaks_mvp.py"
 
 #########################################################
 #Setup
@@ -35,6 +34,7 @@ ACTIVATE="${ACTIVATE:-}"
 export AREC_DEVICE ASR_SCRIPT VOSK_MODEL_DIR
 
 # Commands to run in each tmux window (stdout/stderr go to logs)
+# Run llama LLM
 CMD_LLAMA="stdbuf -oL -eL \"${LLAMA_BIN}\" -m \"${LLAMA_MODEL}\" ${LLAMA_ARGS} \
   > \"${LOG_DIR}/llama.log\" 2>&1"
 
@@ -43,6 +43,7 @@ CMD_LLAMA="stdbuf -oL -eL \"${LLAMA_BIN}\" -m \"${LLAMA_MODEL}\" ${LLAMA_ARGS} \
 #   stdbuf -oL -eL \"${PIPER_BIN}\" --server --host 127.0.0.1 --port ${PIPER_PORT} -m \"${PIPER_MODEL}\" \
 #   >> \"${LOG_DIR}/piper.log\" 2>&1"
 
+# Run piper/vosk script
 CMD_ASR="$ACTIVATE stdbuf -oL -eL bash -lc 'set -Eeuo pipefail; \
   : \"\${AREC_DEVICE:?}\"; : \"\${ASR_SCRIPT:?}\"; \
   OMP_NUM_THREADS=2 PYTHONUNBUFFERED=1 PYTHONWARNINGS=default \
