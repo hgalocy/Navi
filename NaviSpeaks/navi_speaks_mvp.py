@@ -19,24 +19,50 @@ LLAMA_SYS_PROMPT = os.environ.get("LLAMA_SYS_PROMPT",
 
 # If voice is multi-speaker, set SPEAKER_ID to an int, else None
 SPEAKER_ID = None
-APLAY_DEV = "default" #ie: "plughw:1,0"
+APLAY_DEV = "plughw:1,3"   # HDMI audio out to Predator monitor. can change to "default"
 
 # ASR audio format must match arecord command
 SAMPLE_RATE = int(os.environ.get("ASR_RATE", "16000"))
 BUF_SIZE = 4000  # bytes; matches arecord -F 20000 frame chunks fine enough
 SPEAK_BACKOFF_SEC = 0.35  # small extra mute after TTS ends
-MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "8"))
+MIN_UTTERANCE_CHARS = int(os.environ.get("MIN_UTTERANCE_CHARS", "6"))
 MAX_UTTERANCE_CHARS = int(os.environ.get("MAX_UTTERANCE_CHARS", "512"))
 # VAD webrtcvad stuff
 VAD = webrtcvad.Vad(0)  # 0-3 (3=aggressive)
 # assuming 16 kHz mono S16_LE
 FRAME_MS = 30
 BYTES_PER_FRAME = int(SAMPLE_RATE * 2 * FRAME_MS / 1000)  # 960 bytes at 16khz
-TAIL_FRAMES = 25  # ~750 ms of trailing silence to finalize an utterance
-MAX_FRAMES   = int(6_000 / FRAME_MS)
-START_FRAMES = 2 # need only ~60 ms of speech to trigger
+TAIL_FRAMES = 40  # 0.6s trailing silence
+MAX_FRAMES   = int(8000 / FRAME_MS) #8s of max speech
+START_FRAMES = 3 # need only ~60 ms of speech to trigger
 
 SPEAKING = False # Changes to true when Navi is talking
+
+##########################################
+#IE vosk mishears hey navi as hey natalie#
+##########################################
+WAKE_SYNONYMS = [
+    "hey navi", "hi navi", "okay navi", "hey na vi",
+    "hey navvy", "hey naafi", "hey nahvee",
+    "hey natalie", "hey natty", "hey naughty", "hey now the"
+]
+def normalize(text: str) -> str:
+    t = text.lower().strip()
+    # common replacements that collapse to "navi"
+    t = t.replace("natalie", "navi").replace("natty", "navi").replace("naughty", "navi")
+    t = t.replace("now the", "navi").replace("na vi", "navi").replace("navvy", "navi").replace("naafi", "navi")
+    return " ".join(t.split())
+
+def has_wake(text: str) -> bool:
+    t = normalize(text)
+    return any(t.startswith(w) for w in WAKE_SYNONYMS)
+
+def strip_wake(text: str) -> str:
+    t = normalize(text)
+    for w in WAKE_SYNONYMS:
+        if t.startswith(w):
+            return t[len(w):].strip(" ,.?-!")
+    return t
 
 # ==== Personalities ====
 PERSONALITIES = {
@@ -95,8 +121,12 @@ def Say(text, style):
     if not text: #make sure we're saying something
         return
 
+    # Pre-mute: stop listening for a short buffer window
     SPEAKING = True
     try:
+        with audio_q.mutex:
+            audio_q.queue.clear()
+        time.sleep(0.1)  # small pause to let arecord pipeline drain
         # Build Piper command with style knobs
         piper_cmd = [
             PIPER_BIN,
@@ -124,6 +154,7 @@ def Say(text, style):
         p1.wait()
         time.sleep(SPEAK_BACKOFF_SEC)  # let the speaker “ring down”
     finally:
+        time.sleep(0.2)
         SPEAKING = False
 
 def Log(msg):
@@ -203,6 +234,7 @@ def main():
                 if is_speech:
                     rec.AcceptWaveform(data)
                     tail_silence_frames = 0
+                    speech_frames += 1
                 else:
                     # we were in speech; count trailing silence
                     tail_silence_frames += 1
@@ -217,8 +249,8 @@ def main():
                                 if len(text) > MAX_UTTERANCE_CHARS:
                                     text = text[:MAX_UTTERANCE_CHARS]
 
-                                if text.startswith("hey navi"):
-                                    user = text[8:].strip()  # after wake word
+                                if has_wake(text):
+                                    user = strip_wake(text)
 
                                     # Personality switching: "navi personality cheerful"
                                     global ACTIVE_PERSONALITY
@@ -241,6 +273,7 @@ def main():
                         ring.clear()
                         voiced = False
                         tail_silence_frames = 0
+                        speech_frames = 0
     except KeyboardInterrupt:
         pass
     

@@ -8,9 +8,9 @@ LLAMA_ARGS="-c 4096 -t 4 -ngl 0 --port 8080 --host 127.0.0.1"
 
 # Mic and Speaker
 # Vosk + Piper
-AREC_DEVICE="${AREC_DEVICE:-default}" #"plughw:2,0"
-VOSK_MODEL_DIR="/home/freezypaws/models/vosk/en-us"
-ASR_SCRIPT="NaviSpeaks/navi_speaks_mvp.py"
+AREC_DEVICE="plughw:0,0"   # ReSpeaker 4-Mic Array. can change to "${AREC_DEVICE:-default}"
+VOSK_MODEL_DIR="${HOME}/models/vosk/en-us"
+ASR_SCRIPT="${HOME}/Navi/NaviSpeaks/navi_speaks_mvp.py"
 
 #########################################################
 #Setup
@@ -47,8 +47,9 @@ CMD_LLAMA="stdbuf -oL -eL \"${LLAMA_BIN}\" -m \"${LLAMA_MODEL}\" ${LLAMA_ARGS} \
 CMD_ASR="$ACTIVATE stdbuf -oL -eL bash -lc 'set -Eeuo pipefail; \
   : \"\${AREC_DEVICE:?}\"; : \"\${ASR_SCRIPT:?}\"; \
   OMP_NUM_THREADS=2 PYTHONUNBUFFERED=1 PYTHONWARNINGS=default \
-  arecord -q -f S16_LE -c1 -r16000 -D \"\${AREC_DEVICE}\" \
-    | python3 -u -X dev -X faulthandler \"\${ASR_SCRIPT}\"' \
+  arecord -q -f S16_LE -c1 -r16000 -D "${AREC_DEVICE}" \
+  -B 2000000 -F 16000 \
+  | python3 -u -X dev -X faulthandler "${ASR_SCRIPT}"' \
   > \"${LOG_DIR}/asr_loop.log\" 2>&1"
 
 
