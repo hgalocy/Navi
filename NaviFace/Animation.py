@@ -8,6 +8,19 @@ import threading
 import sys
 import select
 
+import os
+import subprocess
+
+if "DISPLAY" not in os.environ:
+    try:
+        display = subprocess.check_output(
+            "who | grep '(:' | head -n1 | awk '{print $NF}'",
+            shell=True
+        ).decode().strip("()\n")
+        os.environ["DISPLAY"] = display
+    except:
+        os.environ["DISPLAY"] = ":0"
+        
 kPiperPath = "/home/freezypaws/piper/piper"
 kModelPath = "/home/freezypaws/piper/voices/en_US/amy_low/en_US-amy-low.onnx"
 
