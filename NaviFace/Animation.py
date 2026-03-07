@@ -141,23 +141,37 @@ eye_color += vec3(1.0, 1.0, 1.0) * highlight * 0.35;
     // -------------------------
     // Mouth
     //--------------------------
-    vec2 mouth_center = vec2(0.0, -0.12);
+
+// mouth width
+vec2 mouth_center = vec2(0.0, -0.12);
 vec2 p = uv - mouth_center;
+float halfWidth = 0.16;
+float widthMask = 1.0 - smoothstep(halfWidth - 0.015, halfWidth, abs(p.x));
 
-// parabola smile
-float curve = p.y - p.x * p.x * 1.2;
+// smile curve
+float top_curve = p.x * p.x * 1.2;
 
-// restrict width of smile
-float hardEdge = step(abs(p.x), 0.16);
-float widthMask = smoothstep(0.16, 0.13, abs(p.x))* hardEdge;
+// closed smile line
+float closedSmile = smoothstep(0.018, 0.0, abs(p.y - top_curve))* widthMask;
 
-// thin line
-float smileMask = smoothstep(0.02, 0.0, abs(curve));
+// mouth opening
+float depth = mouthOpen * 0.11;
 
-float mouthMask = smileMask * widthMask;
+// bottom curve
+float bottom_curve = top_curve - depth;
 
-// talking widens slightly
-mouthMask *= 1.0 + mouthOpen * 1.5;
+// curved width falloff (no vertical sides)
+float sideCurve = smoothstep(0.22, 0.05, abs(p.x));
+
+// inside open mouth region
+float openRegion =
+    step(p.y, top_curve) *
+    step(bottom_curve, p.y) *
+    sideCurve *
+    smoothstep(0.02, 0.05, mouthOpen);
+
+// choose between closed smile and open mouth
+float mouthMask = mix(closedSmile, openRegion, smoothstep(0.01, 0.05, mouthOpen));
 
 final_color += vec3(0.4,1.0,1.0) * mouthMask * 0.8;
 
@@ -296,7 +310,7 @@ def on_draw():
 
     if is_talking_:
         # ---- Animate Mouth ----
-        mouth = (math.sin(t * 9) + 1) * 0.5
+        mouth = abs(math.sin(t * 12)) * 0.7
         prog["mouthOpen"].value = mouth * 0.6
         prog["gaze"].value = (0.0, 0.0)
         # ---- Head nod slightly ----
