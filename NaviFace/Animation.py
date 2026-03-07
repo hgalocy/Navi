@@ -36,6 +36,7 @@ prog = ctx.program(
         uniform float blink;
         uniform float mouthOpen;
         uniform float zoom; 
+        uniform float time;
         
         out vec4 fragColor;
 
@@ -147,14 +148,18 @@ eye_color += vec3(1.0, 1.0, 1.0) * highlight * 0.35;
 
 // mouth width
 vec2 mouth_center = vec2(0.0, -0.12);
+mouth_center.y += sin(time * 2.0) * 0.002;
 vec2 p = uv - mouth_center;
+
+// subtle organic mouth wobble when talking
+p.y += sin(p.x * 10.0) * mouthOpen * 0.01;
 
 // width limit
 float halfWidth = 0.16;
 float widthMask = 1.0 - smoothstep(halfWidth - 0.015, halfWidth, abs(p.x));
 
 // smile curve (top boundary)
-float top_curve = p.x * p.x * 1.2;
+float top_curve = p.x * p.x * mix(1.2, 1.5, mouthOpen);
 top_curve -= mouthOpen * 0.015;
 
 // closed smile line
@@ -224,6 +229,8 @@ prog["gaze"].value = (0.0, 0.0)
 prog["headTilt"].value = 0.0
 prog["blink"].value = 0.0
 prog["mouthOpen"].value = 0.0
+start = time.time()
+prog["time"].value = time.time() - start
 
 quad = np.array([
     -1.0, -1.0,
@@ -342,12 +349,12 @@ def on_draw():
     ctx.clear(0.0, 0.0, 0.0)
 
     t = time.time() - start_time
-    
+    prog["time"].value = t
+
     if is_talking_:
         # ---- Animate Mouth ----
         target_mouth = abs(math.sin(t * 11)) * 0.8
         mouth = abs(math.sin(t * 12)) * 0.7
-        prog["mouthOpen"].value = mouth * 0.6
         prog["gaze"].value = (0.0, 0.0)
         # ---- Head nod slightly ----
         prog["headTilt"].value = update_head(t) + math.sin(t * 5) * 0.01
