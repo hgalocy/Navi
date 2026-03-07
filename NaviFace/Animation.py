@@ -25,9 +25,12 @@ kPiperPath = "/home/freezypaws/piper/piper"
 kModelPath = "/home/freezypaws/piper/voices/en_US/amy_low/en_US-amy-low.onnx"
 
 is_talking_ = False
+audio_level_ = 0.0
 current_mouth_ = 0.0
 last_talk_time_ = 0
 talk_hold_time_ = 0.8
+prev_rms_ = 0.0
+mouth_phase_ = 0.0
 
 window = pyglet.window.Window(fullscreen=True)
 width, height = window.get_framebuffer_size()
@@ -327,22 +330,63 @@ def micro_jitter(t, speed=10.0, amount=0.004, offset=0.0):
 
 #Navi is talking
 def navi_speak(text):
-    global is_talking_, last_talk_time_
+    global is_talking_, audio_level_, last_talk_time_, prev_rms_
 
     def run():
-        global is_talking_
+        global is_talking_, audio_level_, last_talk_time_, prev_rms_
 
-        is_talking_ = True
-        cmd = f'''
-echo "{text}" | \
-{kPiperPath} \
---model {kModelPath} \
---output_raw | \
-aplay -D plughw:0,0 -r 22050 -f S16_LE -t raw
-'''
-        subprocess.run(cmd, shell=True)
+        cmd = [
+            kPiperPath,
+            "--model", kModelPath,
+            "--output_raw",
+            "--threads", "2"
+        ]
+        piper = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE
+        )
+        aplay = subprocess.Popen(
+            ["aplay", "-D", "plughw:0,0", "-r", "22050", "-f", "S16_LE", "-t", "raw"],
+            stdin=subprocess.PIPE
+        )
+
+        piper.stdin.write(text.encode())
+        piper.stdin.close()
+
+        started = False
+        while True:
+            chunk = piper.stdout.read(1024)
+            if not chunk:
+                break
+            if not started:
+                is_talking_ = True
+                started = True
+            aplay.stdin.write(chunk)
+            # compute amplitude
+            samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+
+            if samples.size > 0:
+
+                rms = np.sqrt(np.mean(samples * samples)) / 32768.0
+
+                # boost articulation
+                level = min(rms * 3.0, 1.0)
+
+                # fast attack, slow release envelope
+                if level > audio_level_:
+                    audio_level_ = audio_level_ * 0.4 + level * 0.6
+                else:
+                    audio_level_ = audio_level_ * 0.85 + level * 0.15
+
+        aplay.stdin.close()
+        piper.wait()
+        aplay.wait()
+
+        audio_level_ = 0.0
         is_talking_ = False
         last_talk_time_ = time.time()
+
     threading.Thread(target=run).start()
     
 @window.event
@@ -352,7 +396,7 @@ def on_key_press(symbol, modifiers):
 
 @window.event
 def on_draw():
-    global is_talking_, current_mouth_
+    global is_talking_, current_mouth_, mouth_phase_
 
     if select.select([sys.stdin], [], [], 0)[0]:
         cmd = sys.stdin.readline().strip()
@@ -366,14 +410,22 @@ def on_draw():
 
     if is_talking_:
         # ---- Animate Mouth ----
-        target_mouth = abs(math.sin(t * 11)) * 0.8
-        mouth = abs(math.sin(t * 12)) * 0.7
+        # advance mouth rhythm
+        mouth_phase_ += 0.35
+        # talking rhythm (open/close)
+        talk_cycle = (math.sin(mouth_phase_) + 1.0) * 0.5
+        # amplitude controls how wide the mouth opens
+        amp = min(audio_level_ * 9.0, 1.0)
+        target_mouth = talk_cycle * amp
+        if target_mouth < 0.02:
+            target_mouth = 0.0
         prog["gaze"].value = (0.0, 0.0)
         # ---- Head nod slightly ----
         prog["headTilt"].value = update_head(t) + math.sin(t * 5) * 0.01
     elif time.time() - last_talk_time_ < talk_hold_time_:
         # keep looking forward briefly after talking
         prog["gaze"].value = (0.0, 0.0)
+        target_mouth = 0.0
     else:
         prog["mouthOpen"].value = 0.0
         # ---- idle eye movement ----
@@ -383,7 +435,7 @@ def on_draw():
         target_mouth = 0.0
 
     # smooth transition
-    current_mouth_ += (target_mouth - current_mouth_) * 0.25
+    current_mouth_ += (target_mouth - current_mouth_) * 0.45
     prog["mouthOpen"].value = current_mouth_
 
     # ---- Subtle breathing motion ----
