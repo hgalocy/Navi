@@ -12,6 +12,9 @@ kPiperPath = "/home/freezypaws/piper/piper"
 kModelPath = "/home/freezypaws/piper/voices/en_US/amy_low/en_US-amy-low.onnx"
 
 is_talking_ = False
+current_mouth_ = 0.0
+last_talk_time_ = 0
+talk_hold_time_ = 0.8
 
 window = pyglet.window.Window(fullscreen=True)
 width, height = window.get_framebuffer_size()
@@ -152,10 +155,14 @@ float widthMask = 1.0 - smoothstep(halfWidth - 0.015, halfWidth, abs(p.x));
 
 // smile curve (top boundary)
 float top_curve = p.x * p.x * 1.2;
+top_curve -= mouthOpen * 0.015;
 
 // closed smile line
-float closedSmile = smoothstep(0.018, 0.0, abs(p.y - top_curve))*widthMask;
-
+float closedSmile =
+    smoothstep(0.022, 0.0, abs(p.y - top_curve))
+    * widthMask
+    * (1.0 - smoothstep(0.02, 0.07, mouthOpen));
+    
 // mouth opening depth
 float depth = mouthOpen * 0.13;
 
@@ -169,7 +176,8 @@ float ellipse =
     ((p.y - (top_curve - depth))*(p.y - (top_curve - depth)))/(b*b);
 
 // inside ellipse
-float insideEllipse = step(ellipse, 1.0);
+float ellipseEdge = smoothstep(1.10, 0.98, ellipse);
+float insideEllipse = smoothstep(1.12, 0.90, ellipse);
 
 // only draw bottom half
 insideEllipse *= step(p.y, top_curve);
@@ -178,10 +186,30 @@ insideEllipse *= step(p.y, top_curve);
 insideEllipse *= smoothstep(0.02, 0.06, mouthOpen);
 
 // choose idle vs open
+// soft glow gradient like the eyes
 float mouthMask = mix(closedSmile, insideEllipse, smoothstep(0.01, 0.05, mouthOpen));
 
-final_color += vec3(0.4,1.0,1.0) * mouthMask * 0.8;
+// distance from the smile curve (used for glow)
+float distFromCurve = abs(p.y - top_curve);
 
+// main glow like the idle smile
+float topGlow = smoothstep(0.14, 0.0, distFromCurve);
+topGlow *= mix(1.0, 1.4, smoothstep(0.02, 0.07, mouthOpen));
+
+float bodyFill = insideEllipse * 0.25;
+float edgeGlow = ellipseEdge * 0.75;
+
+float glow =
+    topGlow * closedSmile +     // fuzzy smile edge
+    edgeGlow * insideEllipse +  // fuzzy ellipse edge
+    bodyFill * insideEllipse;   // soft interior
+
+// clamp so it doesn't over-brighten
+glow = clamp(glow, 0.0, 1.0);
+
+vec3 mouthColor = vec3(0.4, 1.0, 1.0);
+
+final_color += mouthColor * glow * 0.9;
     fragColor = vec4(final_color, 1.0);
 }
     """,
@@ -279,7 +307,7 @@ def micro_jitter(t, speed=10.0, amount=0.004, offset=0.0):
 
 #Navi is talking
 def navi_speak(text):
-    global is_talking_
+    global is_talking_, last_talk_time_
 
     def run():
         global is_talking_
@@ -294,6 +322,7 @@ aplay -D plughw:0,0 -r 22050 -f S16_LE -t raw
 '''
         subprocess.run(cmd, shell=True)
         is_talking_ = False
+        last_talk_time_ = time.time()
     threading.Thread(target=run).start()
     
 @window.event
@@ -303,7 +332,7 @@ def on_key_press(symbol, modifiers):
 
 @window.event
 def on_draw():
-    global is_talking_
+    global is_talking_, current_mouth_
 
     if select.select([sys.stdin], [], [], 0)[0]:
         cmd = sys.stdin.readline().strip()
@@ -314,20 +343,28 @@ def on_draw():
 
     t = time.time() - start_time
     
-
     if is_talking_:
         # ---- Animate Mouth ----
+        target_mouth = abs(math.sin(t * 11)) * 0.8
         mouth = abs(math.sin(t * 12)) * 0.7
         prog["mouthOpen"].value = mouth * 0.6
         prog["gaze"].value = (0.0, 0.0)
         # ---- Head nod slightly ----
         prog["headTilt"].value = update_head(t) + math.sin(t * 5) * 0.01
+    elif time.time() - last_talk_time_ < talk_hold_time_:
+        # keep looking forward briefly after talking
+        prog["gaze"].value = (0.0, 0.0)
     else:
         prog["mouthOpen"].value = 0.0
         # ---- idle eye movement ----
         prog["gaze"].value = update_gaze(t)
         # ---- gentle head tilt idle motion ----
         prog["headTilt"].value = update_head(t)
+        target_mouth = 0.0
+
+    # smooth transition
+    current_mouth_ += (target_mouth - current_mouth_) * 0.25
+    prog["mouthOpen"].value = current_mouth_
 
     # ---- Subtle breathing motion ----
     zoom = 1.35 + math.sin(t * 0.25) * 0.01
