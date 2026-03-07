@@ -145,33 +145,40 @@ eye_color += vec3(1.0, 1.0, 1.0) * highlight * 0.35;
 // mouth width
 vec2 mouth_center = vec2(0.0, -0.12);
 vec2 p = uv - mouth_center;
+
+// width limit
 float halfWidth = 0.16;
 float widthMask = 1.0 - smoothstep(halfWidth - 0.015, halfWidth, abs(p.x));
 
-// smile curve
+// smile curve (top boundary)
 float top_curve = p.x * p.x * 1.2;
 
 // closed smile line
-float closedSmile = smoothstep(0.018, 0.0, abs(p.y - top_curve))* widthMask;
+float closedSmile = smoothstep(0.018, 0.0, abs(p.y - top_curve))*widthMask;
 
-// mouth opening
-float depth = mouthOpen * 0.11;
+// mouth opening depth
+float depth = mouthOpen * 0.13;
 
-// bottom curve
-float bottom_curve = top_curve - depth;
+// ellipse parameters
+float a = 0.16;      // width
+float b = depth;     // height
 
-// curved width falloff (no vertical sides)
-float sideCurve = smoothstep(0.22, 0.05, abs(p.x));
+// ellipse centered under the smile
+float ellipse =
+    (p.x*p.x)/(a*a) +
+    ((p.y - (top_curve - depth))*(p.y - (top_curve - depth)))/(b*b);
 
-// inside open mouth region
-float openRegion =
-    step(p.y, top_curve) *
-    step(bottom_curve, p.y) *
-    sideCurve *
-    smoothstep(0.02, 0.05, mouthOpen);
+// inside ellipse
+float insideEllipse = step(ellipse, 1.0);
 
-// choose between closed smile and open mouth
-float mouthMask = mix(closedSmile, openRegion, smoothstep(0.01, 0.05, mouthOpen));
+// only draw bottom half
+insideEllipse *= step(p.y, top_curve);
+
+// only when talking
+insideEllipse *= smoothstep(0.02, 0.06, mouthOpen);
+
+// choose idle vs open
+float mouthMask = mix(closedSmile, insideEllipse, smoothstep(0.01, 0.05, mouthOpen));
 
 final_color += vec3(0.4,1.0,1.0) * mouthMask * 0.8;
 
